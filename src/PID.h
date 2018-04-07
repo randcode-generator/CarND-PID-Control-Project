@@ -17,6 +17,12 @@ public:
   double Ki;
   double Kd;
 
+  //previous cte
+  double prev_cte;
+
+  //steering
+  double steering;
+
   /*
   * Constructor
   */
@@ -40,7 +46,13 @@ public:
   /*
   * Calculate the total PID error.
   */
-  double TotalError();
+  double TotalError() {
+    return i_error;
+  }
+
+  double GetSteering() {
+    return steering;
+  }
 };
 
 #endif /* PID_H */

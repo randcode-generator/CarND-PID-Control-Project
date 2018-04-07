@@ -3,6 +3,8 @@
 #include "json.hpp"
 #include "PID.h"
 #include <math.h>
+#include <cstring>
+#include <fstream>
 
 // for convenience
 using json = nlohmann::json;
@@ -28,14 +30,26 @@ std::string hasData(std::string s) {
   return "";
 }
 
-int main()
+int main(int argc, char** argv)
 {
   uWS::Hub h;
 
   PID pid;
-  // TODO: Initialize the pid variable.
+  bool isTraining = false;
 
-  h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
+  if(argc == 4) {
+    double p = std::stod(argv[1]);
+    double i = std::stod(argv[2]);
+    double d = std::stod(argv[3]);
+    std::cout<<"current -> p: "<<p<<" i: "<<i<<" d:"<<d<<std::endl;
+    isTraining = true;
+    pid.Init(p, i, d);
+  }else {
+    pid.Init(0.272, 0, 30.002);
+  }
+
+  int count = 0;
+  h.onMessage([&pid, &count, &isTraining](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -48,25 +62,46 @@ int main()
         if (event == "telemetry") {
           // j[1] is the data JSON object
           double cte = std::stod(j[1]["cte"].get<std::string>());
-          double speed = std::stod(j[1]["speed"].get<std::string>());
-          double angle = std::stod(j[1]["steering_angle"].get<std::string>());
-          double steer_value;
-          /*
-          * TODO: Calcuate steering value here, remember the steering value is
-          * [-1, 1].
-          * NOTE: Feel free to play around with the throttle and speed. Maybe use
-          * another PID controller to control the speed!
-          */
-          
+          double current_speed = std::stod(j[1]["speed"].get<std::string>());
+          double steer_value = 0;
+
+          double throttle = 1;
+
+          pid.UpdateError(cte);
+          double s_rad = std::fmod(pid.GetSteering(), 2 * pi());
+          double s_deg = rad2deg(s_rad);
+          steer_value = s_deg/25.0;
+
+          //If there's too much deviation (error), slow down
+          if(cte > 0.2 || cte < -0.2) {
+            throttle = -0.2;
+          }
+
+          //If too slow, speed up
+          if(current_speed < 20) {
+            throttle = 1;
+          }
+
           // DEBUG
           std::cout << "CTE: " << cte << " Steering Value: " << steer_value << std::endl;
+          std::cout << pid.TotalError()<<std::endl;
 
           json msgJson;
           msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = 0.3;
+          msgJson["throttle"] = throttle;
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+
+          if(isTraining && count == 1000) {
+            std::ofstream f;
+            f.open("out.txt");
+            f << pid.TotalError();
+            f.close();
+            auto msg = "42[\"reset\"]";
+            ws.send(msg, strlen(msg), uWS::OpCode::TEXT);
+            exit(1);
+          }
+          count++;
         }
       } else {
         // Manual driving
